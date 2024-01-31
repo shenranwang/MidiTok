@@ -12,12 +12,14 @@ from .mmm import MMM
 from .mumidi import MuMIDI
 from .octuple import Octuple
 from .remi import REMI
+from .remi_custom import REMICustom
 from .structured import Structured
 from .tsd import TSD
 
 __all__ = [
     "MIDILike",
     "REMI",
+    "REMICustom",
     "TSD",
     "Structured",
     "Octuple",

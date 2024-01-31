@@ -11,6 +11,7 @@ from .midi_tokenizer import MIDITokenizer
 from .tokenizations import (
     MMM,
     REMI,
+    REMICustom,
     TSD,
     CPWord,
     MIDILike,
@@ -27,6 +28,7 @@ __all__ = [
     "TokenizerConfig",
     "MIDILike",
     "REMI",
+    "REMICustom",
     "TSD",
     "Structured",
     "Octuple",
