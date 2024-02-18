@@ -527,8 +527,8 @@ class CPWord(MIDITokenizer):
                                 ticks_per_beat = self._tpb_per_ts[
                                     current_time_sig.denominator
                                 ]
-                                ticks_per_pos = ticks_per_beat // max(
-                                    self.config.beat_res.values()
+                                ticks_per_pos = (
+                                    ticks_per_beat // self.config.max_num_pos_per_beat
                                 )
                     elif bar_pos == "Position":  # i.e. its a position
                         if current_bar == -1:
@@ -627,7 +627,7 @@ class CPWord(MIDITokenizer):
         # PITCH
         vocab[2].append("Ignore_None")
         vocab[2] += [f"Pitch_{i}" for i in range(*self.config.pitch_range)]
-        if self.config.use_drums_pitch_tokens:
+        if self.config.use_pitchdrum_tokens:
             vocab[2] += [
                 f"PitchDrum_{i}" for i in range(*self.config.drums_pitch_range)
             ]
@@ -704,7 +704,7 @@ class CPWord(MIDITokenizer):
             dic[key].append("Ignore")
         dic["Ignore"] = list(dic.keys())
 
-        if self.config.use_drums_pitch_tokens:
+        if self.config.use_pitchdrum_tokens:
             dic["PitchDrum"] = dic["Pitch"]
             for key, values in dic.items():
                 if "Pitch" in values:

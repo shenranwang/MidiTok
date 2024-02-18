@@ -437,8 +437,8 @@ class REMI(MIDITokenizer):
                             current_time_sig, midi.ticks_per_quarter
                         )
                         ticks_per_beat = self._tpb_per_ts[den]
-                        ticks_per_pos = ticks_per_beat // max(
-                            self.config.beat_res.values()
+                        ticks_per_pos = (
+                            ticks_per_beat // self.config.max_num_pos_per_beat
                         )
                 elif tok_type == "Pedal":
                     pedal_prog = (
@@ -696,7 +696,7 @@ class REMI(MIDITokenizer):
                     dic["Program"].append(token_type)
                     dic[token_type].append("Program")
 
-        if self.config.use_drums_pitch_tokens:
+        if self.config.use_pitchdrum_tokens:
             dic["PitchDrum"] = dic["Pitch"]
             for key, values in dic.items():
                 if "Pitch" in values:
