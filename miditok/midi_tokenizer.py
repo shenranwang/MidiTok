@@ -166,7 +166,7 @@ class MIDITokenizer(ABC, HFHubMixin):
         # Duration: tpb --> np.array (ticks) to get the closest;
         # Duration/TimeShift/Rest: ticks + tpb --> token (str);
         # Duration/TimeShift/Rest: token + tpb --> ticks (int);
-        self.durations = self.__create_durations_tuples()
+        self.durations = self._create_durations_tuples()
         self._tpb_to_time_array = self.__create_tpb_to_ticks_array()
         self._tpb_tokens_to_ticks = self.__create_tpb_tokens_to_ticks()
         self._tpb_ticks_to_tokens = self.__create_tpb_ticks_to_tokens()
@@ -232,18 +232,19 @@ class MIDITokenizer(ABC, HFHubMixin):
         Get the base vocabulary, as a dictionary mapping tokens (str) to their ids.
 
         The different (hidden / protected) vocabulary attributes of the class are:
+
         * ``._vocab_base`` : Dict[str: int] token -> id - Registers all known base
-        tokens;
+            tokens;
         * ``.__vocab_base_inv`` : Dict[int: str] id -> token - Inverse of
-        ``._base_vocab`` , to go the other way;
+            ``._base_vocab`` , to go the other way;
         * ``._vocab_base_id_to_byte`` : Dict[int: str] id -> byte - Link ids to their
-        associated unique bytes;
+            associated unique bytes;
         * ``._vocab_base_byte_to_token`` : Dict[str: str] - similar as above but for
-        tokens;
+            tokens;
         * ``._vocab_bpe_bytes_to_tokens`` : Dict[str: List[str]] byte(s) -> token(s)
-        used to decode BPE;
+            used to decode BPE;
         * ``._bpe_model.get_vocab()`` : Dict[str: int] byte -> id - bpe model
-        vocabulary, based on unique bytes.
+            vocabulary, based on unique bytes.
 
         Before training the tokenizer with BPE, bytes are obtained by running
         ``chr(id)`` . After training, if we did start from an empty vocabulary, some
@@ -1929,7 +1930,7 @@ class MIDITokenizer(ABC, HFHubMixin):
                 for token_type in original_token_types:
                     self.tokens_types_graph[token_type].append(special_token_type)
 
-    def __create_durations_tuples(self) -> list[tuple[int, int, int]]:
+    def _create_durations_tuples(self) -> list[tuple[int, int, int]]:
         r"""
         Create the possible durations in beat / position units as tuples of intergers.
 
@@ -2770,6 +2771,44 @@ class MIDITokenizer(ABC, HFHubMixin):
 
         return self._convert_sequence_to_tokseq(json_content["ids"])
 
+    def save_pretrained(
+        self,
+        save_directory: str | Path,
+        *,
+        repo_id: str | None = None,
+        push_to_hub: bool = False,
+        **push_to_hub_kwargs,
+    ) -> str | None:
+        """
+        Save the tokenizer in local a directory.
+
+        Overridden from ``huggingface_hub.ModelHubMixin``.
+        Since v0.21 this method will automatically save ``self.config`` on after
+        calling ``self._save_pretrained``, which is unnecessary in our case.
+
+        :param save_directory: Path to directory in which the model weights and
+            configuration will be saved.
+        :param push_to_hub: Whether to push your model to the Huggingface Hub after
+            saving it.
+        :param repo_id: ID of your repository on the Hub. Used only if
+            `push_to_hub=True`. Will default to the folder name if not provided.
+        :param push_to_hub_kwargs: Additional key word arguments passed along to the
+            [`~ModelHubMixin.push_to_hub`] method.
+        """
+        save_directory = Path(save_directory)
+        save_directory.mkdir(parents=True, exist_ok=True)
+
+        # save model weights/files (framework-specific)
+        self._save_pretrained(save_directory)
+
+        # push to the Hub if required
+        if push_to_hub:
+            kwargs = push_to_hub_kwargs.copy()  # soft-copy to avoid mutating input
+            if repo_id is None:
+                repo_id = save_directory.name  # Defaults to `save_directory` name
+            return self.push_to_hub(repo_id=repo_id, **kwargs)
+        return None
+
     def _save_pretrained(self, *args, **kwargs) -> None:  # noqa: ANN002
         # called by `ModelHubMixin.from_pretrained`.
         self.save_params(*args, **kwargs)
@@ -3121,7 +3160,8 @@ class MIDITokenizer(ABC, HFHubMixin):
             return self.__get_from_voc(item[1], item[0])
         if self.is_multi_voc and isinstance(item, str):
             if all(item in voc for voc in self.vocab):
-                return [voc[item] for voc in self.vocab]
+                # It should be the same id for all sub-vocabs
+                return self.vocab[0][item]
 
             msg = (
                 "This tokenizer uses multiple vocabularies / embedding pooling. To"

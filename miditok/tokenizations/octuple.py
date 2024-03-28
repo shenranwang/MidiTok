@@ -19,6 +19,7 @@ class Octuple(MIDITokenizer):
     represents a single note. Tokens (*Pitch*, *Velocity*...) are first independently
     converted to embeddings which are then merged (pooled) into a single one.
     Each pooled token will be a list of the form (index: Token type):
+
     * 0: Pitch/PitchDrum;
     * 1: Velocity;
     * 2: Duration;
@@ -36,18 +37,19 @@ class Octuple(MIDITokenizer):
     small models.
 
     **Notes:**
+
     * As the time signature is carried simultaneously with the note tokens, if a Time
-    Signature change occurs and that the following bar do not contain any note, the
-    time will be shifted by one or multiple bars depending on the previous time
-    signature numerator and time gap between the last and current note. Octuple
-    cannot represent time signature accurately, hence some unavoidable errors of
-    conversion can happen. **For this reason, Octuple is implemented with Time
-    Signature but tested without.**
+        Signature change occurs and that the following bar do not contain any note, the
+        time will be shifted by one or multiple bars depending on the previous time
+        signature numerator and time gap between the last and current note. Octuple
+        cannot represent time signature accurately, hence some unavoidable errors of
+        conversion can happen. **For this reason, Octuple is implemented with Time
+        Signature but tested without.**
     * Tokens are first sorted by time, then track, then pitch values.
     * Tracks with the same *Program* will be merged.
     * When decoding multiple token sequences (of multiple tracks), i.e. when
-    `config.use_programs` is False, only the tempos and time signatures of the
-    first sequence will be decoded for the whole MIDI.
+        `config.use_programs` is False, only the tempos and time signatures of the
+        first sequence will be decoded for the whole MIDI.
     """
 
     def _tweak_config_before_creating_voc(self) -> None:
