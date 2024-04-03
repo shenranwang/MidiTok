@@ -33,6 +33,7 @@ def split_midis_for_training(
     average_num_tokens_per_note: float | None = None,
     num_overlap_bars: int = 1,
     min_seq_len: int | None = None,
+    split_tracks: bool = True,
 ) -> list[Path]:
     """
     Split a list of MIDIs into smaller chunks to use for training.
@@ -71,6 +72,7 @@ def split_midis_for_training(
     :param min_seq_len: minimum sequence length, only used when splitting at the last
         bar of the MIDI. (default: ``None``, see default value of
         :py:func:`miditok.pytorch_data.split_midi_per_note_density`)
+    :param split_tracks: flag for optionally disabling splitting the MIDI tracks.
     :return: the paths to the MIDI splits.
     """
     # Safety checks
@@ -109,7 +111,7 @@ def split_midis_for_training(
 
         # Separate track first if needed
         tracks_separated = False
-        if not tokenizer.one_token_stream and len(midis[0].tracks) > 1:
+        if not tokenizer.one_token_stream and split_tracks and len(midis[0].tracks) > 1:
             midis = split_midi_per_tracks(midis[0])
             tracks_separated = True
 
