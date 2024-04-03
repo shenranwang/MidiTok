@@ -100,6 +100,7 @@ class DatasetMIDI(_DatasetABC):
     :param bos_token_id: *BOS* token id. (default: ``None``)
     :param eos_token_id: *EOS* token id. (default: ``None``)
     :param pre_tokenize:
+    :param keep_all_tracks:
     :param func_to_get_labels: a function to retrieve the label of a file. The method
         must take two positional arguments: the first is either the
         :class:`miditok.TokSequence` returned when tokenizing a MIDI, the second is the
@@ -121,6 +122,7 @@ class DatasetMIDI(_DatasetABC):
         bos_token_id: int | None = None,
         eos_token_id: int | None = None,
         pre_tokenize: bool = False,
+        keep_all_tracks: bool = False,
         func_to_get_labels: Callable[
             [Score, TokSequence | list[TokSequence], Path],
             int | list[int] | LongTensor,
@@ -138,6 +140,7 @@ class DatasetMIDI(_DatasetABC):
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
         self.pre_tokenize = pre_tokenize
+        self.keep_all_tracks = keep_all_tracks
         self.func_to_get_labels = func_to_get_labels
         self.sample_key_name = sample_key_name
         self.labels_key_name = labels_key_name
@@ -186,14 +189,20 @@ class DatasetMIDI(_DatasetABC):
             midi = Score(self.files_paths[idx])
             tokseq = self._tokenize_midi(midi)
             # If not one_token_stream, we only take the first track/sequence
-            token_ids = tokseq.ids if self.tokenizer.one_token_stream else tokseq[0].ids
+            if self.tokenizer.one_token_stream and not self.keep_all_tracks:
+                token_ids = tokseq.ids
+            elif self.keep_all_tracks:
+                token_ids = tokseq
+            else:
+                token_ids = tokseq[0].ids
+
             if self.func_to_get_labels is not None:
                 # tokseq can be given as a list of TokSequence to get the labels
                 labels = self.func_to_get_labels(midi, tokseq, self.files_paths[idx])
                 if not isinstance(labels, LongTensor):
                     labels = LongTensor(labels)
 
-        item = {self.sample_key_name: LongTensor(token_ids)}
+        item = {self.sample_key_name: [LongTensor(ids) for ids in token_ids]}
         if labels is not None:
             item[self.labels_key_name] = labels
 
@@ -204,7 +213,7 @@ class DatasetMIDI(_DatasetABC):
         tokseq = self.tokenizer.midi_to_tokens(midi)
 
         # If tokenizing on the fly a multi-stream tokenizer, only keeps the first track
-        if not self.pre_tokenize and not self.tokenizer.one_token_stream:
+        if not self.pre_tokenize and not self.tokenizer.one_token_stream and not self.keep_all_tracks:
             tokseq = [tokseq[0]]
 
         # If this file is a chunk (split_midis_for_training), determine its id.
