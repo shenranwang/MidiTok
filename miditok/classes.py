@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import warnings
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import log2
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from numpy import ndarray
 
@@ -24,7 +24,9 @@ from .constants import (
     DELETE_EQUAL_SUCCESSIVE_TEMPO_CHANGES,
     DELETE_EQUAL_SUCCESSIVE_TIME_SIG_CHANGES,
     DRUM_PITCH_RANGE,
+    ENCODE_IDS_SPLIT,
     LOG_TEMPOS,
+    MANDATORY_SPECIAL_TOKENS,
     MAX_PITCH_INTERVAL,
     NUM_TEMPOS,
     NUM_VELOCITIES,
@@ -109,20 +111,67 @@ class TokSequence:
     * events (list of Event): Event objects that can carry time or other information
     useful for debugging;
     * bytes (str): ids are converted into unique bytes, all joined together in a single
-    string. This is used by MidiTok internally for BPE.
+    string. This is used internally by MidiTok for the tokenizer's model (BPE, Unigram,
+    WordPiece).
 
     Bytes are used internally by MidiTok for Byte Pair Encoding.
-    The ``ids_are_bpe_encoded`` attribute tells if ``ids`` is encoded with BPE.
+    The ``are_ids_encoded`` attribute tells if ``ids`` is encoded.
 
-    :py:meth:`miditok.MIDITokenizer.complete_sequence`
+    :py:meth:`miditok.MusicTokenizer.complete_sequence` can be used to complete the
+    non-initialized attributes.
     """
 
     tokens: list[str | list[str]] = None
-    ids: list[int | list[int]] = None  # BPE can be applied on ids
+    ids: list[int | list[int]] = None  # can be encoded with BPE/Unigram/WordPiece
     bytes: str = None  # noqa: A003
     events: list[Event | list[Event]] = None
-    ids_bpe_encoded: bool = False
-    _ids_no_bpe: list[int | list[int]] = None
+    are_ids_encoded: bool = False
+    _ticks_bars: list[int] = None  # slice/add not handled
+    _ticks_beats: list[int] = None  # slice/add not handled
+    _ids_decoded: list[int | list[int]] = None
+
+    def split_per_bars(self) -> list[TokSequence]:
+        """
+        Split the sequence into subsequences corresponding to each bar.
+
+        The method can only be called from sequences properly tokenized, otherwise it
+        will throw an error.
+
+        :return: list of subsequences for each bar.
+        """
+        return self._split_per_ticks(self._ticks_bars)
+
+    def split_per_beats(self) -> list[TokSequence]:
+        """
+        Split the sequence into subsequences corresponding to each beat.
+
+        The method can only be called from sequences properly tokenized, otherwise it
+        will throw an error.
+
+        :return: list of subsequences for each beat.
+        """
+        return self._split_per_ticks(self._ticks_beats)
+
+    def _split_per_ticks(self, ticks: list[int]) -> list[TokSequence]:
+        idxs = [0]
+        ti_prev = 0
+        for bi in range(1, len(ticks)):
+            ti = ti_prev
+            while ti < len(self.events) and self.events[ti].time < ticks[bi]:
+                ti += 1
+            if ti == len(self.events):
+                break
+            idxs.append(ti)
+            ti_prev = ti
+
+        # Split the sequence
+        idxs.append(None)
+        subsequences = [self[idxs[i - 1] : idxs[i]] for i in range(1, len(idxs))]
+        # Remove their _ticks_bars and _ticks_beats
+        for subseq in subsequences:
+            subseq._ticks_bars = subseq._ticks_beats = None
+
+        return subsequences
 
     def __len__(self) -> int:
         """
@@ -138,8 +187,8 @@ class TokSequence:
             return len(self.events)
         if self.bytes is not None:
             return len(self.bytes)
-        if self._ids_no_bpe is not None:
-            return len(self._ids_no_bpe)
+        if self._ids_decoded is not None:
+            return len(self._ids_decoded)
 
         msg = (
             "This TokSequence seems to not be initialized, all its attributes "
@@ -147,31 +196,48 @@ class TokSequence:
         )
         raise ValueError(msg)
 
-    def __getitem__(self, idx: int) -> int | str | Event:
+    def __getitem__(self, val: int | slice) -> int | str | Event | TokSequence:
         """
-        Return the ``idx``th element of the sequence.
+        Return the ``idx``th element or slice of the sequence.
 
-        It checks by order: ids, tokens, events, bytes.
+        If an integer is providing, it checks by order: ids, tokens, events, bytes.
 
-        :param idx: index of the element to retrieve.
+        :param val: index of the element to retrieve.
         :return: ``idx``th element.
         """
+        if isinstance(val, slice):
+            return self.__slice(val)
+
         if self.ids is not None:
-            return self.ids[idx]
+            return self.ids[val]
         if self.tokens is not None:
-            return self.tokens[idx]
+            return self.tokens[val]
         if self.events is not None:
-            return self.events[idx]
+            return self.events[val]
         if self.bytes is not None:
-            return self.bytes[idx]
-        if self._ids_no_bpe is not None:
-            return self._ids_no_bpe[idx]
+            return self.bytes[val]
+        if self._ids_decoded is not None:
+            return self._ids_decoded[val]
 
         msg = (
             "This TokSequence seems to not be initialized, all its attributes "
             "are None."
         )
         raise ValueError(msg)
+
+    def __slice(self, sli: slice) -> TokSequence:
+        """
+        Slice the ``TokSequence``.
+
+        :param sli: slice object.
+        :return: the slice of the self ``TokSequence``.
+        """
+        seq = replace(self)
+        attributes = ["tokens", "ids", "bytes", "events", "_ids_decoded"]
+        for attr in attributes:
+            if getattr(self, attr):
+                setattr(seq, attr, getattr(self, attr)[sli])
+        return seq
 
     def __eq__(self, other: TokSequence) -> bool:
         r"""
@@ -195,18 +261,78 @@ class TokSequence:
 
         return one_common_attr and all(eq)
 
+    def __add__(self, other: TokSequence) -> TokSequence:
+        """
+        Concatenate two ``TokSequence`` objects.
+
+        The `ìds``, ``tokens``, ``events`` and ``bytes`` will be concatenated.
+
+        :param other: other ``TokSequence``.
+        :return: the concatenation of the two sequences.
+        """
+        seq = replace(self)
+        seq += other
+        return seq
+
+    def __iadd__(self, other: TokSequence) -> TokSequence:
+        """
+        Concatenate the self ``TokSequence`` to another one.
+
+        The `ìds``, ``tokens``, ``events`` and ``bytes`` will be concatenated.
+
+        :param other: other ``TokSequence``.
+        :return: self.
+        """
+        if not isinstance(other, TokSequence):
+            msg = (
+                "Addition to a `TokSequence` object can only be performed with other"
+                f"`TokSequence` objects. Received: {other.__class__.__name__}"
+            )
+            raise ValueError(msg)
+        attributes = ["tokens", "ids", "bytes", "events", "_ids_decoded"]
+        for attr in attributes:
+            self_attr, other_attr = getattr(self, attr), getattr(other, attr)
+            if self_attr is not None and other_attr is not None:
+                setattr(self, attr, self_attr + other_attr)
+
+        return self
+
+
+def _format_special_token(token: str) -> str:
+    """
+    Format a special token provided by a user.
+
+    The method will split it in a "type" and a "value" categories separated by an
+    underscore.
+
+    :param token: special token as string.
+    :return: formated special token.
+    """
+    parts = token.split("_")
+    if len(parts) == 1:
+        parts.append("None")
+    elif len(parts) > 2:
+        parts = ["-".join(parts[:-1]), parts[-1]]
+        warnings.warn(
+            f"miditok.TokenizerConfig: special token {token} must"
+            " contain one underscore (_).This token will be saved as"
+            f" {'_'.join(parts)}.",
+            stacklevel=2,
+        )
+    return "_".join(parts)
+
 
 class TokenizerConfig:
     r"""
     Tokenizer configuration, to be used with all tokenizers.
 
-    :param pitch_range: range of MIDI pitches to use. Pitches can take values between
+    :param pitch_range: range of note pitches to use. Pitches can take values between
         0 and 127 (included). The `General MIDI 2 (GM2) specifications
         <https://www.midi.org/specifications-old/item/general-midi-2>`_ indicate the
         **recommended** ranges of pitches per MIDI program (instrument). These
         recommended ranges can also be found in ``miditok.constants``. In all cases,
         the range from 21 to 108 (included) covers all the recommended values. When
-        processing a MIDI, the notes with pitches under or above this range can be
+        processing a MIDI file, the notes with pitches under or above this range can be
         discarded. (default: ``(21, 109)``)
     :param beat_res: beat resolutions, as a dictionary in the form:
         ``{(beat_x1, beat_x2): beat_res_1, (beat_x2, beat_x3): beat_res_2, ...}``.
@@ -217,16 +343,23 @@ class TokenizerConfig:
         total number of possible positions will be set at four times the maximum
         resolution given (``max(beat_res.values)``\).
         (default: ``{(0, 4): 8, (4, 12): 4}``)
-    :param num_velocities: number of velocity bins. In the MIDI norm, velocities can
+    :param num_velocities: number of velocity bins. In the MIDI protocol, velocities can
         take up to 128 values (0 to 127). This parameter allows to reduce the number
-        of velocity values. The velocities of the MIDIs resolution will be downsampled
-        to ``num_velocities`` values, equally separated between 0 and 127.
-        (default: ``32``)
-    :param special_tokens: list of special tokens. This must be given as a list of
-        strings, that should represent either the token type alone (e.g. ``PAD``) or
-        the token type and its value separated by an underscore (e.g. ``Genre_rock``).
-        If two or more underscores are given, all but the last one will be replaced
-        with dashes (-). (default: ``["PAD", "BOS", "EOS", "MASK"]``\)
+        of velocity values. The velocities of the file will be downsampled to
+        ``num_velocities`` values, equally spaced between 0 and 127. (default: ``32``)
+    :param special_tokens: list of special tokens. The "PAD" token is required and
+        will be included in the vocabulary anyway if you did not include it in
+        ``special_tokens``. This must be given as a list of strings, that should
+        represent either the token type alone (e.g. ``PAD``) or the token type and its
+        value separated by an underscore (e.g. ``Genre_rock``). If two or more
+        underscores are given, all but the last one will be replaced with dashes (-).
+        (default: ``["PAD", "BOS", "EOS", "MASK"]``\)
+    :param encode_ids_split: allows to split the token ids before encoding them with the
+        tokenizer's model (BPE, Unigram, WordPiece), similarly to how words are split
+        with spaces in text. Doing so, the tokenizer will learn tokens that represent
+        note/musical events successions only occurring within bars or beats. Possible
+        values for this argument are ``"bar"``, ``beat`` or ``no``. (default:
+        ``bar``)
     :param use_chords: will use ``Chord`` tokens, if the tokenizer is compatible. A
         ``Chord`` token indicates the presence of a chord at a certain time step.
         MidiTok uses a chord detection method based on onset times and duration. This
@@ -248,9 +381,9 @@ class TokenizerConfig:
         compatible. ``TimeSignature`` tokens will specify the current time signature.
         Note that :ref:`REMI` adds a ``TimeSignature`` token at the beginning of each
         Bar (i.e. after ``Bar`` tokens), while :ref:`TSD` and :ref:`MIDI-Like` will
-        only represent time signature changes (MIDI messages) as they come. If you want
-        more "recalls" of the current time signature within your token sequences, you
-        can preprocess your MIDI file to add more ``TimeSignatureChange`` objects.
+        only represent time signature changes as they come. If you want more "recalls"
+        of the current time signature within your token sequences, you can preprocess
+        a ``symusic.Score`` object to add more ``symusic.TimeSignature`` objects.
         (default: ``False``)
     :param use_sustain_pedals: will use ``Pedal`` tokens to represent the sustain pedal
         events. In multitrack setting, The value of each ``Pedal`` token will be equal
@@ -271,16 +404,16 @@ class TokenizerConfig:
         the ``programs``, ``one_token_stream_for_programs`` and `program_changes`
         arguments. By default, it will prepend a ``Program`` tokens before each
         ``Pitch``/``NoteOn`` token to indicate its associated instrument, and will
-        treat all the tracks of a MIDI as a single sequence of tokens. :ref:`CPWord`,
+        treat all the tracks of a file as a single sequence of tokens. :ref:`CPWord`,
         :ref:`Octuple` and :ref:`MuMIDI` add a ``Program`` tokens with the stacks of
         ``Pitch``, ``Velocity`` and ``Duration`` tokens. The :ref:`Octuple`, :ref:`MMM`
         and :ref:`MuMIDI` tokenizers use natively ``Program`` tokens, this option is
         always enabled. (default: ``False``)
     :param use_pitchdrum_tokens: will use dedicated ``PitchDrum`` tokens for pitches
-        of drums tracks. In the MIDI norm, the pitches of drums tracks corresponds to
-        discrete drum elements (bass drum, high tom, cymbals...) which are unrelated to
-        the pitch value of other instruments/programs. Using dedicated tokens for drums
-        allow to disambiguate this, and is thus recommended. (default: ``True``)
+        of drums tracks. In the MIDI protocol, the pitches of drums tracks corresponds
+        to discrete drum elements (bass drum, high tom, cymbals...) which are unrelated
+        to the pitch value of other instruments/programs. Using dedicated tokens for
+        drums allow to disambiguate this, and is thus recommended. (default: ``True``)
     :param beat_res_rest: the beat resolution of ``Rest`` tokens. It follows the same
         data pattern as the ``beat_res`` argument, however the maximum resolution for
         rests cannot be higher than the highest "global" resolution (``beat_res``).
@@ -303,14 +436,14 @@ class TokenizerConfig:
         (default: ``(40, 250)``)
     :param log_tempos: will use log scaled tempo values instead of linearly scaled.
         (default: ``False``)
-    :param remove_duplicated_notes: will remove duplicated notes before tokenizing
-        MIDIs. Notes with the same onset time and pitch value will be deduplicated.
+    :param remove_duplicated_notes: will remove duplicated notes before tokenizing.
+        Notes with the same onset time and pitch value will be deduplicated.
         This option will slightly increase the tokenization time. This option will add
-        an extra note sorting step in the MIDI preprocessing, which can increase the
-        overall tokenization time. (default: ``False``)
+        an extra note sorting step in the music file preprocessing, which can increase
+        the overall tokenization time. (default: ``False``)
     :param delete_equal_successive_tempo_changes: setting this option True will delete
-        identical successive tempo changes when preprocessing a MIDI file after loading
-        it. For examples, if a MIDI has two tempo changes for tempo 120 at tick 1000
+        identical successive tempo changes when preprocessing a music file after loading
+        it. For examples, if a file has two tempo changes for tempo 120 at tick 1000
         and the next one is for tempo 121 at tick 1200, during preprocessing the tempo
         values are likely to be downsampled and become identical (120 or 121). If
         that's the case, the second tempo change will be deleted and not tokenized.
@@ -318,8 +451,8 @@ class TokenizerConfig:
         information at recurrent timings (e.g. :ref:`Octuple`). For others, note that
         setting it True might reduce the number of ``Tempo`` tokens and in turn the
         recurrence of this information. Leave it False if you want to have recurrent
-        ``Tempo`` tokens, that you might inject yourself by adding ``TempoChange``
-        objects to your MIDIs. (default: ``False``)
+        ``Tempo`` tokens, that you might inject yourself by adding ``symusic.Tempo``
+        objects to a ``symusic.Score``. (default: ``False``)
     :param time_signature_range: range as a dictionary
         ``{denom_i: [num_i1, ..., num_in]/(min_num_i, max_num_i)}``.
         (default: ``{8: [3, 12, 6], 4: [5, 6, 3, 2, 1, 4]}``)
@@ -333,8 +466,8 @@ class TokenizerConfig:
         will be ``num_of_values`` tokens equally spaced between ``lowest_value` and
         `highest_value``. (default: ``(-8192, 8191, 32)``)
     :param delete_equal_successive_time_sig_changes: setting this option True will
-        delete identical successive time signature changes when preprocessing a MIDI
-        file after loading it. For examples, if a MIDI has two time signature changes
+        delete identical successive time signature changes when preprocessing a music
+        file after loading it. For examples, if a file has two time signature changes
         for 4/4 at tick 1000 and the next one is also 4/4 at tick 1200, the second time
         signature change will be deleted and not tokenized. This parameter doesn't
         apply for tokenizations that natively inject the time signature information at
@@ -342,18 +475,19 @@ class TokenizerConfig:
         ``True`` might reduce the number of ``TimeSig`` tokens and in turn the
         recurrence of this information. Leave it ``False`` if you want to have
         recurrent ``TimeSig`` tokens, that you might inject yourself by adding
-        ``TimeSignatureChange`` objects to your MIDIs. (default: ``False``)
+        ``symusic.TimeSignature`` objects to a ``symusic.Score``. (default: ``False``)
     :param programs: sequence of MIDI programs to use. Note that ``-1`` is used and
         reserved for drums tracks. (default: ``list(range(-1, 128))``, from -1 to 127
         included)
     :param one_token_stream_for_programs: when using programs (``use_programs``), this
-        parameters will make the tokenizer treat all the tracks of a MIDI as a single
-        stream of tokens. A ``Program`` token will prepend each ``Pitch``, ``NoteOn``
-        and ``NoteOff`` tokens to indicate their associated program / instrument. Note
-        that this parameter is always set to True for :ref:`MuMIDI` and :ref:`MMM`.
-        Setting it to False will make the tokenizer not use ``Programs``, but will
-        allow to still have ``Program`` tokens in the vocabulary. (default: ``True``)
-    :param program_changes: to be used with ``use_programs``. If given True, the
+        parameters will make the tokenizer serialize all the tracks of a
+        ``symusic.Score`` in a single sequence of tokens. A ``Program`` token will
+        prepend each ``Pitch``, ``NoteOn`` and ``NoteOff`` tokens to indicate their
+        associated program / instrument. Note that this parameter is always set to True
+        for :ref:`MuMIDI` and :ref:`MMM`. Disabling will make the tokenizer not use
+        ``Programs``, but will allow to still have ``Program`` tokens in the vocabulary.
+        (default: ``True``)
+    :param program_changes: to be used with ``use_programs``. If given ``True``, the
         tokenizer will place ``Program`` tokens whenever a note is being played by an
         instrument different from the last one. This mimics the ProgramChange MIDI
         messages. If given False, a ``Program`` token will precede each note tokens
@@ -380,6 +514,7 @@ class TokenizerConfig:
         beat_res: dict[tuple[int, int], int] = BEAT_RES,
         num_velocities: int = NUM_VELOCITIES,
         special_tokens: Sequence[str] = SPECIAL_TOKENS,
+        encode_ids_split: Literal["bar", "beat", "no"] = ENCODE_IDS_SPLIT,
         use_chords: bool = USE_CHORDS,
         use_rests: bool = USE_RESTS,
         use_tempos: bool = USE_TEMPOS,
@@ -440,8 +575,8 @@ class TokenizerConfig:
                 if not log2(denominator).is_integer():
                     msg = (
                         "`time_signature_range` contains an invalid time signature "
-                        "denominator. The MIDI norm only supports powers of 2"
-                        f"denominators. Received {denominator}"
+                        "denominator. MidiTok only supports powers of 2 denominators, "
+                        f"does the MIDI protocol. Received {denominator}."
                     )
                     raise ValueError(msg)
 
@@ -449,21 +584,26 @@ class TokenizerConfig:
         self.pitch_range: tuple[int, int] = pitch_range
         self.beat_res: dict[tuple[int, int], int] = beat_res
         self.num_velocities: int = num_velocities
+        self.remove_duplicated_notes = remove_duplicated_notes
+        self.encode_ids_split = encode_ids_split
+
+        # Special tokens
         self.special_tokens: list[str] = []
-        for special_token in special_tokens:
-            parts = special_token.split("_")
-            if len(parts) == 1:
-                parts.append("None")
-            elif len(parts) > 2:
-                parts = ["-".join(parts[:-1]), parts[-1]]
+        for special_token in list(special_tokens):
+            token = _format_special_token(special_token)
+            if token not in self.special_tokens:
+                self.special_tokens.append(token)
+            else:
                 warnings.warn(
-                    f"miditok.TokenizerConfig: special token {special_token} must"
-                    " contain one underscore (_).This token will be saved as"
-                    f" {'_'.join(parts)}.",
+                    f"The special token {token} is present twice in your configuration."
+                    f" Skipping its duplicated occurrence.",
                     stacklevel=2,
                 )
-            self.special_tokens.append("_".join(parts))
-        self.remove_duplicated_notes = remove_duplicated_notes
+        # Mandatory special tokens, no warning here
+        for special_token in MANDATORY_SPECIAL_TOKENS:
+            token = _format_special_token(special_token)
+            if token not in self.special_tokens:
+                self.special_tokens.append(token)
 
         # Additional token types params, enabling additional token types
         self.use_chords: bool = use_chords
@@ -573,8 +713,7 @@ class TokenizerConfig:
             configuration object.
         :returns: The ``TokenizerConfig`` object instantiated from those parameters.
         """
-        input_dict.update(**input_dict["additional_params"])
-        input_dict.pop("additional_params")
+        input_dict.update(**input_dict.pop("additional_params"))
         for key in IGNORED_CONFIG_KEY_DICT:
             if key in input_dict:
                 input_dict.pop(key)
@@ -596,7 +735,7 @@ class TokenizerConfig:
 
     def __serialize_dict(self, dict_: dict) -> None:
         r"""
-        Convert numpy arrays to lists recursively within a dictionary.
+        Recursively convert non-json-serializable values of a dict to lists.
 
         :param dict_: dictionary to serialize
         """
@@ -606,7 +745,7 @@ class TokenizerConfig:
             elif isinstance(dict_[key], ndarray):
                 dict_[key] = dict_[key].tolist()
 
-    def save_to_json(self, out_path: str | Path) -> None:
+    def save_to_json(self, out_path: Path) -> None:
         r"""
         Save a tokenizer configuration object to the `out_path` path.
 
@@ -629,7 +768,7 @@ class TokenizerConfig:
             json.dump(dict_config, outfile, indent=4)
 
     @classmethod
-    def load_from_json(cls, config_file_path: str | Path) -> TokenizerConfig:
+    def load_from_json(cls, config_file_path: Path) -> TokenizerConfig:
         r"""
         Load a tokenizer configuration from the `config_path` path.
 
@@ -653,6 +792,14 @@ class TokenizerConfig:
         }
 
         return cls.from_dict(dict_config)
+
+    def copy(self) -> TokenizerConfig:
+        """
+        Copy the ``TokSequence``.
+
+        :return: a copy of the ``TokSequence``.
+        """
+        return deepcopy(self)
 
     def __eq__(self, other: TokenizerConfig) -> bool:
         """

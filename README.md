@@ -1,6 +1,6 @@
 # MidiTok
 
-Python package to tokenize MIDI music files, presented at the ISMIR 2021 LBDs.
+Python package to tokenize music files, introduced at the ISMIR 2021 LBDs.
 
 ![MidiTok Logo](docs/assets/logo.png?raw=true "")
 
@@ -13,8 +13,8 @@ Python package to tokenize MIDI music files, presented at the ISMIR 2021 LBDs.
 [![Downloads](https://static.pepy.tech/badge/miditok)](https://pepy.tech/project/MidiTok)
 [![Code style](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-MidiTok can tokenize MIDI files, i.e. convert them into sequences of tokens ready to be fed to models such as Transformer, for any generation, transcription or MIR task.
-MidiTok features most known [MIDI tokenizations](https://miditok.readthedocs.io/en/latest/tokenizations.html) (e.g. [REMI](https://arxiv.org/abs/2002.00212), [Compound Word](https://arxiv.org/abs/2101.02402)...), and is built around the idea that they all share common parameters and methods. It supports [Byte Pair Encoding (BPE)](https://arxiv.org/abs/2301.11975) and data augmentation.
+MidiTok can tokenize MIDI and abc files, i.e. convert them into sequences of tokens ready to be fed to models such as Transformer, for any generation, transcription or MIR task.
+MidiTok features most known [music tokenizations](https://miditok.readthedocs.io/en/latest/tokenizations.html) (e.g. [REMI](https://arxiv.org/abs/2002.00212), [Compound Word](https://arxiv.org/abs/2101.02402)...), and is built around the idea that they all share common parameters and methods. Tokenizers can be trained with [Byte Pair Encoding (BPE)](https://aclanthology.org/2023.emnlp-main.123/), [Unigram](https://aclanthology.org/P18-1007/) and [WordPiece](https://arxiv.org/abs/1609.08144), and it offers data augmentation methods.
 
 MidiTok is integrated with the Hugging Face Hub 🤗! Don't hesitate to share your models to the community!
 
@@ -25,7 +25,7 @@ MidiTok is integrated with the Hugging Face Hub 🤗! Don't hesitate to share yo
 ```shell
 pip install miditok
 ```
-MidiTok uses [Symusic](https://github.com/Yikai-Liao/symusic) to read and write MIDI files, and BPE is backed by [Hugging Face 🤗tokenizers](https://github.com/huggingface/tokenizers) for super-fast encoding.
+MidiTok uses [Symusic](https://github.com/Yikai-Liao/symusic) to read and write MIDI and abc files, and BPE/Unigram is backed by [Hugging Face 🤗tokenizers](https://github.com/huggingface/tokenizers) for superfast encoding.
 
 ## Usage example
 
@@ -42,14 +42,14 @@ tokenizer = REMI(config)
 # Loads a midi, converts to tokens, and back to a MIDI
 midi = Score("path/to/your_midi.mid")
 tokens = tokenizer(midi)  # calling the tokenizer will automatically detect MIDIs, paths and tokens
-converted_back_midi = tokenizer(tokens)  # PyTorch / Tensorflow / Numpy tensors supported
+converted_back_midi = tokenizer(tokens)  # PyTorch, Tensorflow and Numpy tensors are supported
 ```
 
-Here is a complete yet concise example of how you can use MidiTok to train any PyTorch model. And [here](colab-notebooks/Full_Example_HuggingFace_GPT2_Transformer.ipynb) is a simple notebook example showing how to use Hugging Face models to generate music, with MidiTok taking care of tokenizing MIDIs.
+Here is a complete yet concise example of how you can use MidiTok to train any PyTorch model. And [here](colab-notebooks/Full_Example_HuggingFace_GPT2_Transformer.ipynb) is a simple notebook example showing how to use Hugging Face models to generate music, with MidiTok taking care of tokenizing music files.
 
 ```python
 from miditok import REMI, TokenizerConfig
-from miditok.pytorch_data import DatasetMIDI, DataCollator, split_midis_for_training
+from miditok.pytorch_data import DatasetMIDI, DataCollator, split_files_for_training
 from torch.utils.data import DataLoader
 from pathlib import Path
 
@@ -58,16 +58,16 @@ config = TokenizerConfig(num_velocities=16, use_chords=True, use_programs=True)
 tokenizer = REMI(config)
 
 # Train the tokenizer with Byte Pair Encoding (BPE)
-midi_paths = list(Path("path", "to", "midis").glob("**/*.mid"))
-tokenizer.learn_bpe(vocab_size=30000, files_paths=midi_paths)
+files_paths = list(Path("path", "to", "midis").glob("**/*.mid"))
+tokenizer.train(vocab_size=30000, files_paths=files_paths)
 tokenizer.save_params(Path("path", "to", "save", "tokenizer.json"))
 # And pushing it to the Hugging Face hub (you can download it back with .from_pretrained)
 tokenizer.push_to_hub("username/model-name", private=True, token="your_hf_token")
 
 # Split MIDIs into smaller chunks for training
 dataset_chunks_dir = Path("path", "to", "midi_chunks")
-split_midis_for_training(
-    files_paths=midi_paths,
+split_files_for_training(
+    files_paths=files_paths,
     tokenizer=tokenizer,
     save_dir=dataset_chunks_dir,
     max_seq_len=1024,
@@ -81,7 +81,7 @@ dataset = DatasetMIDI(
     bos_token_id=tokenizer["BOS_None"],
     eos_token_id=tokenizer["EOS_None"],
 )
-collator = DataCollator(tokenizer["PAD_None"])
+collator = DataCollator(tokenizer.pad_token_id, copy_inputs_as_labels=True)
 dataloader = DataLoader(dataset, batch_size=64, collate_fn=collator)
 
 # Iterate over the dataloader to train a model
@@ -110,10 +110,10 @@ Contributions are gratefully welcomed, feel free to open an issue or send a PR i
 
 ### Todos
 
+* Support music-xml files;
 * `no_duration_drums` option, discarding duration tokens for drum notes;
-* Extend unimplemented additional tokens to all compatible tokenizations;
 * Control Change messages;
-* Speeding up the MIDI preprocess + global/track events parsing with Rust or C++ binding.
+* Speed-up global/track events parsing with Rust or C++ bindings.
 
 ## Citation
 
@@ -136,8 +136,7 @@ The BibTeX citations of all tokenizations can be found [in the documentation](ht
 
 ## Acknowledgments
 
-Special thanks to all the contributors.
-We acknowledge [Aubay](https://blog.aubay.com/index.php/language/en/home/?lang=en), the [LIP6](https://www.lip6.fr/?LANG=en), [LERIA](http://blog.univ-angers.fr/leria/n) and [ESEO](https://eseo.fr/en) for the initial financing and support.
+@Natooz thanks its employers who allowed him to develop this project, by chronological order [Aubay](https://blog.aubay.com/index.php/language/en/home/?lang=en), the [LIP6 (Sorbonne University)](https://www.lip6.fr/?LANG=en), and the [Metacreation Lab (Simon Fraser University)](https://www.metacreation.net).
 
 ## All Thanks To Our Contributors
 

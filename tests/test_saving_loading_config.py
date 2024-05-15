@@ -9,7 +9,7 @@ import pytest
 
 import miditok
 
-from .utils_tests import ALL_TOKENIZATIONS, MIDI_PATHS_MULTITRACK
+from .utils_tests import ALL_TOKENIZATIONS, MAX_BAR_EMBEDDING, MIDI_PATHS_MULTITRACK
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,6 +23,7 @@ ADDITIONAL_TOKENS_TEST = {
     "beat_res_rest": {(0, 16): 4},
     "num_tempos": 32,
     "tempo_range": (40, 250),
+    "base_tokenizer": "TSD",
 }
 
 TOK_PARAMS_MULTITRACK = []
@@ -36,6 +37,10 @@ tokenizations_non_one_stream = [
 ]
 for tokenization_ in ALL_TOKENIZATIONS:
     params_ = {"use_programs": True}
+    if tokenization_ == "MMM":
+        params_["base_tokenizer"] = "TSD"
+    elif tokenization_ in ["Octuple", "MuMIDI"]:
+        params_["max_bar_embedding"] = MAX_BAR_EMBEDDING
     TOK_PARAMS_MULTITRACK.append((tokenization_, params_))
 
     if tokenization_ in tokenizations_non_one_stream:
@@ -71,12 +76,12 @@ def test_saving_loading_tokenizer(tokenization: str, tmp_path: Path):
     If all went well the reloaded tokenizer should be identical.
     """
     tokenizer_config = miditok.TokenizerConfig(**ADDITIONAL_TOKENS_TEST)
-    tokenizer: miditok.MIDITokenizer = getattr(miditok, tokenization)(
+    tokenizer: miditok.MusicTokenizer = getattr(miditok, tokenization)(
         tokenizer_config=tokenizer_config
     )
     tokenizer.save_params(tmp_path / f"{tokenization}.txt")
 
-    tokenizer2: miditok.MIDITokenizer = getattr(miditok, tokenization)(
+    tokenizer2: miditok.MusicTokenizer = getattr(miditok, tokenization)(
         params=tmp_path / f"{tokenization}.txt"
     )
     assert tokenizer == tokenizer2
@@ -85,21 +90,21 @@ def test_saving_loading_tokenizer(tokenization: str, tmp_path: Path):
         assert tokenizer != tokenizer2
 
 
-@pytest.mark.parametrize("midi_path", MIDI_PATHS_MULTITRACK[:3])
+@pytest.mark.parametrize("file_path", MIDI_PATHS_MULTITRACK[:3])
 @pytest.mark.parametrize("tok_params_set", TOK_PARAMS_MULTITRACK)
 def test_multitrack_midi_to_tokens_to_midi(
-    midi_path: str | Path,
+    file_path: Path,
     tok_params_set: tuple[str, dict[str, Any]],
     tmp_path: Path,
 ):
     # Create tokenizer
     tokenization, params = tok_params_set
-    tokenizer: miditok.MIDITokenizer = getattr(miditok, tokenization)(
+    tokenizer: miditok.MusicTokenizer = getattr(miditok, tokenization)(
         tokenizer_config=miditok.TokenizerConfig(**params)
     )
 
     # Tokenize the file, save tokens and load them back
-    tokens = tokenizer(midi_path)
+    tokens = tokenizer(file_path)
     tokenizer.save_tokens(tokens, tmp_path / "tokens.json")
     tokens_loaded = tokenizer.load_tokens(tmp_path / "tokens.json")
 

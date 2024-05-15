@@ -22,7 +22,7 @@ When training a model, you will likely want to limit the possible token sequence
 To handle such case, MidiTok provides the :py:func:`miditok.pytorch_data.split_midis_for_training` method to dynamically split MIDI files into chunks that should be tokenized in approximately the number of tokens you want.
 If you cannot fit most of your MIDIs into single usable token sequences, we recommend to split your dataset with this method.
 
-Code example
+Data loading example
 --------------------------
 
 MidiTok also provides an "all-in-one" data collator: :class:`miditok.pytorch_data.DataCollator` to be used with PyTorch a ``DataLoader`` in order to pad batches and create attention masks.
@@ -41,7 +41,7 @@ Here is a complete example showing how to use this module to train any model.
 
     # Train the tokenizer with Byte Pair Encoding (BPE)
     midi_paths = list(Path("path", "to", "midis").glob("**/*.mid"))
-    tokenizer.learn_bpe(vocab_size=30000, files_paths=midi_paths)
+    tokenizer.train(vocab_size=30000, files_paths=midi_paths)
     tokenizer.save_params(Path("path", "to", "save", "tokenizer.json"))
     # And pushing it to the Hugging Face hub (you can download it back with .from_pretrained)
     tokenizer.push_to_hub("username/model-name", private=True, token="your_hf_token")
@@ -63,7 +63,7 @@ Here is a complete example showing how to use this module to train any model.
         bos_token_id=tokenizer["BOS_None"],
         eos_token_id=tokenizer["EOS_None"],
     )
-    collator = DataCollator(tokenizer["PAD_None"])
+    collator = DataCollator(tokenizer.pad_token_id, copy_inputs_as_labels=True)
     dataloader = DataLoader(dataset, batch_size=64, collate_fn=collator)
 
     # Iterate over the dataloader to train a model

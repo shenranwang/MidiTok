@@ -7,7 +7,7 @@ Here we only import tokenizer classes and submodules.
 from miditok import data_augmentation
 
 from .classes import Event, TokenizerConfig, TokSequence
-from .midi_tokenizer import MIDITokenizer
+from .midi_tokenizer import MusicTokenizer
 from .tokenizations import (
     MMM,
     REMI,
@@ -19,13 +19,15 @@ from .tokenizations import (
     Octuple,
     Structured,
 )
+from .tokenizer_training_iterator import TokTrainingIterator
 from .utils import utils
 
 __all__ = [
-    "MIDITokenizer",
+    "MusicTokenizer",
     "Event",
     "TokSequence",
     "TokenizerConfig",
+    "TokTrainingIterator",
     "MIDILike",
     "REMI",
     "REMICustom",
