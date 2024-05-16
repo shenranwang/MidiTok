@@ -7,7 +7,9 @@ CURRENT_TOKENIZERS_VERSION = version("tokenizers")
 CURRENT_SYMUSIC_VERSION = version("symusic")
 
 MIDI_FILES_EXTENSIONS = {".mid", ".midi", ".MID", ".MIDI"}
-MIDI_LOADING_EXCEPTION = (
+ABC_FILES_EXTENSIONS = {".abc", ".ABC"}
+SUPPORTED_MUSIC_FILE_EXTENSIONS = MIDI_FILES_EXTENSIONS | ABC_FILES_EXTENSIONS
+SCORE_LOADING_EXCEPTION = (
     RuntimeError,
     ValueError,
     OSError,
@@ -17,16 +19,16 @@ MIDI_LOADING_EXCEPTION = (
 )
 DEFAULT_TOKENIZER_FILE_NAME = "tokenizer.json"
 
-# Starting id of chr() method for BPE, as the 5 (0 to 4 included) firsts are ignored by
-# 🤗tokenizers. We also skip the 32nd (0x20) (space) as it causes issues when loading a
-# BPE model with spaces in merged.
+# Starting id of chr() method for bytes equivalent of tokens.
+# The  first 5 (0 to 4 included) are ignored by 🤗tokenizers. We also skip the 32nd
+# (0x20) (space) as it is used to split sequences of characters into words.
 # Issue for reference: https://github.com/huggingface/tokenizers/issues/566
 # List of unicode characters: https://www.fileformat.info/info/charset/UTF-8/list.htm
 CHR_ID_START = 33
 
-# MIDI encodings default parameters, used when tokenizing a dataset and using tokens
-# These are the parameters from which a MIDI file will be tokenized
-# the recommended pitches for piano in the GM2 specs are from 21 to 108
+# Default parameters for TokenizerConfig, used when tokenizing a dataset and using
+# tokens. These parameters impact the file preprocessing (downsampling).
+# The recommended pitches for piano in the GM2 specs are from 21 to 108
 PITCH_RANGE = (21, 109)
 BEAT_RES = {(0, 4): 8, (4, 12): 4}  # samples per beat
 # number of velocity bins, velocities values from 0 to 127 will be quantized
@@ -35,6 +37,7 @@ NUM_VELOCITIES = 32
 BOS_TOKEN_NAME = "BOS"
 EOS_TOKEN_NAME = "EOS"
 SPECIAL_TOKENS = ["PAD", BOS_TOKEN_NAME, EOS_TOKEN_NAME, "MASK"]
+MANDATORY_SPECIAL_TOKENS = ["PAD"]
 
 USE_CHORDS = False
 USE_RESTS = False
@@ -113,15 +116,25 @@ REMOVE_DUPLICATED_NOTES = False
 
 
 # Tokenizers specific parameters
-MMM_DENSITY_BINS_MAX = (10, 20)
+MMM_COMPATIBLE_TOKENIZERS = {"TSD", "REMI", "MIDILike"}
+USE_BAR_END_TOKENS = False  # REMI
 
-# Defaults values when writing new MIDI files
+# Defaults values when writing new files
 TEMPO = 120
 TIME_SIGNATURE = (4, 4)
 KEY_SIGNATURE_KEY = KEY_SIGNATURE_TONALITY = 0  # C major
 DELETE_EQUAL_SUCCESSIVE_TIME_SIG_CHANGES = False
 
-# For MIDI split in DatasetMIDI
+# Tokenizer training
+DEFAULT_TRAINING_MODEL_NAME = "BPE"
+ENCODE_IDS_SPLIT = "bar"
+WORDPIECE_MAX_INPUT_CHARS_PER_WORD_BAR = 400
+WORDPIECE_MAX_INPUT_CHARS_PER_WORD_BEAT = 100
+UNIGRAM_MAX_INPUT_CHARS_PER_WORD_BAR = 128
+UNIGRAM_MAX_INPUT_CHARS_PER_WORD_BEAT = 32
+UNIGRAM_SPECIAL_TOKEN_SUFFIX = "-unigram"
+
+# For file split in DatasetMIDI
 MAX_NUM_FILES_NUM_TOKENS_PER_NOTE = 200
 
 # Used with chords
