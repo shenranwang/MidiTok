@@ -114,7 +114,7 @@ def split_files_for_training(
 
         # Separate track first if needed
         tracks_separated = False
-        if not tokenizer.one_token_stream and len(scores[0].tracks) > 1:
+        if not tokenizer.one_token_stream and split_tracks and len(scores[0].tracks) > 1:
             scores = split_score_per_tracks(scores[0])
             tracks_separated = True
 
