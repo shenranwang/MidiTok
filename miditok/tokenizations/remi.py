@@ -264,6 +264,51 @@ class REMI(MusicTokenizer):
 
         return all_events
 
+    def get_ticks_per(
+        self,
+        time_sig: tuple[int, int]
+    ) -> tuple:
+        score = Score(self.time_division)
+        current_time_sig = TimeSignature(0, *time_sig)
+        ticks_per_bar = compute_ticks_per_bar(
+            current_time_sig, score.ticks_per_quarter
+        )
+        ticks_per_beat = self._tpb_per_ts[current_time_sig.denominator]
+        ticks_per_pos = ticks_per_beat // self.config.max_num_pos_per_beat
+        return ticks_per_bar, ticks_per_beat, ticks_per_pos
+
+    def token_to_midi_event(
+        self,
+        current_tick,
+        previous_note_end,
+        ticks_per_beat,
+        token_seq,
+    ) -> Note:
+        pitch_type, pitch_val = token_seq[0].split("_")
+        pitch = int(pitch_val)
+        
+        if (
+            not self.config.pitch_range[0]
+            <= pitch
+            <= self.config.pitch_range[1]
+        ):
+            return None, None
+
+        vel_type, vel = token_seq[1].split("_")
+        dur_type, dur = token_seq[2].split("_")
+        if vel_type == "Velocity" and dur_type == "Duration":
+            dur = self._tpb_tokens_to_ticks[ticks_per_beat][dur]
+            new_note = Note(
+                current_tick,
+                dur,
+                pitch,
+                int(vel),
+            )
+            return new_note, max(previous_note_end, current_tick + dur)
+        else:
+            return None, None
+
+
     def _tokens_to_score(
         self,
         tokens: TokSequence | list[TokSequence],
