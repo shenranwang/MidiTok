@@ -153,7 +153,7 @@ class DatasetMIDI(_DatasetABC):
         self.func_to_get_labels = func_to_get_labels
         self.sample_key_name = sample_key_name
         self.labels_key_name = labels_key_name
-        self.samples, self.labels = ([], []) if func_to_get_labels else (None, None)
+        self.samples, self.labels = [], [] if func_to_get_labels else None
 
         # Pre-tokenize the files
         if pre_tokenize:
@@ -203,7 +203,13 @@ class DatasetMIDI(_DatasetABC):
                 score = Score(self.files_paths[idx])
                 tseq = self._tokenize_score(score)
                 # If not one_token_stream, we only take the first track/sequence
-                token_ids = tseq.ids if self.tokenizer.one_token_stream else tseq[0].ids
+                if self.tokenizer.one_token_stream:
+                    token_ids = tseq.ids
+                elif self.keep_all_tracks:
+                    token_ids = [seq.ids for seq in tseq]
+                else:
+                    token_ids = tseq[0].ids
+                print("TOKEN IDS", token_ids)
                 if self.func_to_get_labels is not None:
                     # tokseq can be given as a list of TokSequence to get the labels
                     labels = self.func_to_get_labels(score, tseq, self.files_paths[idx])
