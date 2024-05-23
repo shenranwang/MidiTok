@@ -209,7 +209,6 @@ class DatasetMIDI(_DatasetABC):
                     token_ids = [seq.ids for seq in tseq]
                 else:
                     token_ids = tseq[0].ids
-                print("TOKEN IDS", token_ids)
                 if self.func_to_get_labels is not None:
                     # tokseq can be given as a list of TokSequence to get the labels
                     labels = self.func_to_get_labels(score, tseq, self.files_paths[idx])
@@ -221,7 +220,7 @@ class DatasetMIDI(_DatasetABC):
                 token_ids = None
 
         item = {
-            self.sample_key_name: LongTensor(token_ids)
+            self.sample_key_name: token_ids  # NOTE: LongTensor conversion moved to data collator
             if token_ids is not None
             else None
         }
