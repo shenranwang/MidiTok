@@ -1,4 +1,5 @@
 """Utils methods for Score/tokens split."""
+
 from __future__ import annotations
 
 import json
@@ -7,8 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from warnings import warn
 
-from symusic import Score, TextMeta
-from torch import LongTensor
+from symusic import Score, TextMeta, TimeSignature
+from symusic.core import TimeSignatureTickList
 from tqdm import tqdm
 
 from miditok.constants import (
@@ -16,13 +17,15 @@ from miditok.constants import (
     MIDI_FILES_EXTENSIONS,
     SCORE_LOADING_EXCEPTION,
     SUPPORTED_MUSIC_FILE_EXTENSIONS,
+    TIME_SIGNATURE,
 )
-from miditok.utils import (
+
+from .utils import (
     get_bars_ticks,
+    get_deepest_common_subdir,
     get_num_notes_per_bar,
     split_score_per_tracks,
 )
-from miditok.utils.utils import get_deepest_common_subdir
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -112,7 +115,10 @@ def split_files_for_training(
         except SCORE_LOADING_EXCEPTION:
             continue
 
-        # Separate track first if needed
+        # First preprocess time signatures to avoid cases where they might cause errors
+        _preprocess_time_signatures(scores[0], tokenizer)
+
+        # Separate track if needed
         tracks_separated = False
         if not tokenizer.one_token_stream and split_tracks and len(scores[0].tracks) > 1:
             scores = split_score_per_tracks(scores[0])
@@ -301,12 +307,16 @@ def get_average_num_tokens_per_note(
             continue
         tok_seq = tokenizer(score)
         if tokenizer.one_token_stream:
-            num_notes = score.note_num()
-            num_tokens_per_note.append(len(tok_seq) / num_notes)
+            if (num_notes := score.note_num()) > 0:
+                num_tokens_per_note.append(len(tok_seq) / num_notes)
         else:
             for track, seq in zip(score.tracks, tok_seq):
-                num_tokens_per_note.append(len(seq) / track.note_num())
+                if (num_notes := track.note_num()) > 0:
+                    num_tokens_per_note.append(len(seq) / num_notes)
 
+    if len(num_tokens_per_note) == 0:
+        msg = "All the music files provided are empty and contain no note."
+        raise ValueError(msg)
     return sum(num_tokens_per_note) / len(num_tokens_per_note)
 
 
@@ -329,13 +339,13 @@ def split_seq_in_subsequences(
     while i < len(seq):
         if i >= len(seq) - min_seq_len:
             break  # last sample is too short
-        sub_seq.append(LongTensor(seq[i : i + max_seq_len]))
+        sub_seq.append(seq[i : i + max_seq_len])
         i += len(sub_seq[-1])  # could be replaced with max_seq_len
 
     return sub_seq
 
 
-def split_dataset_to_subsequences(
+def split_tokens_files_to_subsequences(
     files_paths: Sequence[Path],
     out_dir: Path,
     min_seq_len: int,
@@ -343,7 +353,7 @@ def split_dataset_to_subsequences(
     one_token_stream: bool = True,
 ) -> None:
     """
-    Split a dataset of tokens files into subsequences.
+    Split JSON tokens files into subsequences of defined lengths.
 
     This method is particularly useful if you plan to use a
     :class:`miditok.pytorch_data.DatasetJSON`, as it would split token sequences
@@ -380,3 +390,20 @@ def split_dataset_to_subsequences(
                 new_tok = deepcopy(tokens)
                 new_tok["ids"] = subseq
                 json.dump(tokens, outfile)
+
+
+def _preprocess_time_signatures(score: Score, tokenizer: MusicTokenizer) -> None:
+    """
+    Make sure a Score contains time signature valid according to a tokenizer.
+
+    :param score: ``symusic.Score`` to preprocess the time signature.
+    :param tokenizer: :class:`miditok.MusicTokenizer`.
+    """
+    if tokenizer.config.use_time_signatures:
+        tokenizer._filter_unsupported_time_signatures(score.time_signatures)
+        if len(score.time_signatures) == 0 or score.time_signatures[0].time != 0:
+            score.time_signatures.insert(0, TimeSignature(0, *TIME_SIGNATURE))
+    else:
+        score.time_signatures = TimeSignatureTickList(
+            [TimeSignature(0, *TIME_SIGNATURE)]
+        )
