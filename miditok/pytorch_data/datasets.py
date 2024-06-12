@@ -14,6 +14,7 @@ from miditok.constants import SCORE_LOADING_EXCEPTION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from typing import Literal
     from pathlib import Path
 
     from miditok import MusicTokenizer, TokSequence
@@ -109,7 +110,8 @@ class DatasetMIDI(_DatasetABC):
     :param bos_token_id: *BOS* token id. (default: ``None``)
     :param eos_token_id: *EOS* token id. (default: ``None``)
     :param pre_tokenize:
-    :param keep_all_tracks:
+    :param keep_all_tracks: Set string if you want to keep all tracks for processing
+        e.g. labels from all tracks or feed all tracks as input sample. (default: ``None``)
     :param func_to_get_labels: a function to retrieve the label of a file. The method
         must take two positional arguments: the first is either the
         :class:`miditok.TokSequence` returned when tokenizing a file, the second is the
@@ -131,7 +133,7 @@ class DatasetMIDI(_DatasetABC):
         bos_token_id: int | None = None,
         eos_token_id: int | None = None,
         pre_tokenize: bool = False,
-        keep_all_tracks: bool = False,
+        keep_all_tracks: Literal["st_input_sample", "mt_input_sample", None] = None,
         func_to_get_labels: Callable[
             [Score, TokSequence | list[TokSequence], Path],
             int | list[int] | LongTensor,
@@ -205,9 +207,9 @@ class DatasetMIDI(_DatasetABC):
                 # If not one_token_stream, we only take the first track/sequence
                 if self.tokenizer.one_token_stream:
                     token_ids = tseq.ids
-                elif self.keep_all_tracks:
+                elif self.keep_all_tracks == "mt_input_sample":
                     token_ids = [seq.ids for seq in tseq]
-                else:
+                else:  # = self.keep_all_tracks in ["st_input_sample", None]
                     token_ids = tseq[0].ids
                 if self.func_to_get_labels is not None:
                     # tokseq can be given as a list of TokSequence to get the labels
@@ -220,7 +222,7 @@ class DatasetMIDI(_DatasetABC):
                 token_ids = None
 
         item = {
-            self.sample_key_name: token_ids  # NOTE: LongTensor conversion moved to data collator
+            self.sample_key_name: token_ids if self.keep_all_tracks == "mt_input_sample" else LongTensor(token_ids)
             if token_ids is not None
             else None
         }
@@ -233,7 +235,7 @@ class DatasetMIDI(_DatasetABC):
         # Tokenize it
         tokseq = self.tokenizer.encode(score)
 
-        # If tokenizing on the fly a multi-stream tokenizer, only keeps the first track
+        # If tokenizing on the fly a multi-stream tokenizer, keep only first track unless otherwise specified
         if not self.pre_tokenize and not self.tokenizer.one_token_stream and not self.keep_all_tracks:
             tokseq = [tokseq[0]]
 

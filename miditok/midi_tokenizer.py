@@ -334,6 +334,12 @@ class MusicTokenizer(ABC, HFHubMixin):
         return [self[token] for token in self.special_tokens]
 
     @property
+    def special_token_map(self) -> dict[str, int]:
+        return {
+            st: (self.token_ids_of_type(st, 0)[0] if self.is_multi_voc else self[st]) for st in self.special_tokens
+        }
+
+    @property
     def is_trained(self) -> bool:
         """
         Indicate if the tokenizer is trained (``True``).
