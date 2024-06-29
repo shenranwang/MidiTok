@@ -268,7 +268,7 @@ class REMI(MusicTokenizer):
         self,
         time_sig: tuple[int, int]
     ) -> tuple:
-        score = Score(self.time_division)
+        score = Score(self.time_division)  # self.time_division is the denominator of 4/4, i.e. 4
         current_time_sig = TimeSignature(0, *time_sig)
         ticks_per_bar = compute_ticks_per_bar(
             current_time_sig, score.ticks_per_quarter

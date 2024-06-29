@@ -4,15 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from symusic import (
-    Note,
-    Pedal,
-    PitchBend,
-    Score,
-    Tempo,
-    TimeSignature,
-    Track,
-)
+from symusic import Score
 
 from miditok.tokenizations.remi import REMI
 from miditok.classes import TokenizerConfig, TokSequence
@@ -31,17 +23,17 @@ class REMICustom(REMI):
         tokenizer_config: TokenizerConfig = None,
         max_bar_embedding: int | None = None,
         params: str | Path | None = None,
-        remove_token_types_from_chord_seq: list[str] = ['Pitch', 'Velocity'],
+        remove_token_types_from_chord_seq: list[str] = ['Pitch', 'Velocity', 'Duration'],
         remove_token_types_from_instr_seq: list[str] = ['Chord'],
     ) -> None:
         super().__init__(tokenizer_config, max_bar_embedding, params)
         self.remove_from_chord_seq = remove_token_types_from_chord_seq
         self.remove_from_instr_seq = remove_token_types_from_instr_seq
-        # self.instr_vocab, self.chord_vocab = {}, {}
-        # self.separate_chord_vocab()
-        # print("Instrument vocab:", self.vocab)
+        self.instr_vocab, self.chord_vocab = {}, {}
+        self.separate_chord_vocab()
+        # print("Instrument vocab:", self.instr_vocab)
         # print("Chord vocab:", self.chord_vocab)
-        
+
     def separate_chord_vocab(self):
         i, j = 0, 0
         for k,v in self.vocab.items():
@@ -51,7 +43,6 @@ class REMICustom(REMI):
             if self.token_id_type(v) not in self.remove_from_chord_seq:
                 self.chord_vocab[k] = j
                 j += 1
-        self.vocab = self.instr_vocab  # WARNING! Hacky solution to adjust vocab to instr_vocab for compatibility with class functions
                 
     @property
     def vocab(self) -> dict[str, int] | list[dict[str, int]]:
@@ -62,17 +53,14 @@ class REMICustom(REMI):
         """Setter for the vocab property."""
         self._vocab_base = value
 
-    def _create_token_types_graph(self) -> dict[str, set[str]]:
-        dic = super()._create_token_types_graph()
-        dic["Chord"].update(["Duration"])
-        return dic
-
     def get_disabled_indices(self, token_types) -> list[int]:
-        sum([self.token_ids_of_type(t) for t in token_types], [])
+        return sum([self.token_ids_of_type(t) for t in token_types], [])
 
+    @property
     def get_disabled_instr_indices(self) -> list[int]:
         return self.get_disabled_indices(self.remove_from_instr_seq)
 
+    @property
     def get_disabled_chord_indices(self) -> list[int]:
         return self.get_disabled_indices(self.remove_from_chord_seq)
 
@@ -88,9 +76,13 @@ class REMICustom(REMI):
 
     def _score_to_tokens(self, score: Score) -> TokSequence | list[TokSequence]:
         tok_sequence = super()._score_to_tokens(score)
-        instr_seq, chord_seq = tok_sequence[0].ids, tok_sequence[1].ids
+        # tok_sequence[0].ids = [self.instr_vocab[self.vocab[t]] for t in self.remove_extra_tokens_from_instr_seq(instr_seq)]
+        # tok_sequence[1].ids = [self.chord_vocab[self.vocab[t]] for t in self.remove_extra_tokens_from_chord_seq(chord_seq)]
+        instr_seq = tok_sequence[0].ids
         tok_sequence[0].ids = self.remove_extra_tokens_from_instr_seq(instr_seq)
-        tok_sequence[1].ids = self.remove_extra_tokens_from_chord_seq(chord_seq)
+        if len(tok_sequence) == 2: # chord seq available when training
+            chord_seq = tok_sequence[1].ids
+            tok_sequence[1].ids = self.remove_extra_tokens_from_chord_seq(chord_seq)
         return tok_sequence
 
 

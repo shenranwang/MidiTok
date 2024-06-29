@@ -30,7 +30,7 @@ CHR_ID_START = 33
 # tokens. These parameters impact the file preprocessing (downsampling).
 # The recommended pitches for piano in the GM2 specs are from 21 to 108
 PITCH_RANGE = (21, 109)
-BEAT_RES = {(0, 4): 8, (4, 12): 4}  # samples per beat
+BEAT_RES = {(0, 4): 12, (4, 12): 4}  # samples per beat
 # number of velocity bins, velocities values from 0 to 127 will be quantized
 NUM_VELOCITIES = 32
 # default special tokens

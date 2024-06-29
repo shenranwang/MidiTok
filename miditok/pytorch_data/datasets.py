@@ -119,6 +119,9 @@ class DatasetMIDI(_DatasetABC):
         corresponds to the label id (and not the absolute value, e.g. if you are
         classifying 10 musicians, return the id from 0 to 9 included corresponding to
         the musician). (default: ``None``)
+    :param validation_fn: a function checking if a music file is valid validates
+            your conditions (e.g. time signature, minimum/maximum length,
+            instruments...). (default: ``None``)
     :param sample_key_name: name of the dictionary key containing the sample data when
         iterating the dataset. (default: ``"input_ids"``)
     :param labels_key_name: name of the dictionary key containing the labels data when
@@ -139,6 +142,7 @@ class DatasetMIDI(_DatasetABC):
             int | list[int] | LongTensor,
         ]
         | None = None,
+        validation_fn: Callable[[Score], bool] | None = None,
         sample_key_name: str = "input_ids",
         labels_key_name: str = "labels",
     ) -> None:
@@ -153,6 +157,7 @@ class DatasetMIDI(_DatasetABC):
         self.pre_tokenize = pre_tokenize
         self.keep_all_tracks = keep_all_tracks
         self.func_to_get_labels = func_to_get_labels
+        self.validation_fn = validation_fn
         self.sample_key_name = sample_key_name
         self.labels_key_name = labels_key_name
         self.samples, self.labels = [], [] if func_to_get_labels else None
